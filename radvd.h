@@ -117,6 +117,8 @@ struct Interface {
 	struct AdvLowpanCo *AdvLowpanCoList;
 	struct AdvAbro *AdvAbroList;
 
+	struct AdvRASrcAddress *AdvRASrcAddressList;
+
 	int lineno; /* On what line in the config file was this iface defined? */
 };
 
@@ -205,6 +207,12 @@ struct AdvAbro {
 	struct in6_addr LBRaddress;
 
 	struct AdvAbro *next;
+};
+
+struct AdvRASrcAddress {
+	struct in6_addr address;
+
+	struct AdvRASrcAddress *next;
 };
 
 /* Mobile IPv6 extensions */

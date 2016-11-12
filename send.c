@@ -17,7 +17,7 @@
 #include "includes.h"
 #include "radvd.h"
 
-static int really_send(int sock, struct in6_addr const *dest, struct properties const *props, struct safe_buffer const *sb);
+static int really_send(int sock, struct in6_addr const *dest, struct Interface *iface, struct safe_buffer const *sb);
 static int send_ra(int sock, struct Interface *iface, struct in6_addr const *dest);
 static void build_ra(struct safe_buffer * sb, struct Interface const * iface);
 
@@ -736,7 +736,7 @@ static int send_ra(int sock, struct Interface *iface, struct in6_addr const *des
 
 	build_ra(&safe_buffer, iface);
 
-	int err = really_send(sock, dest, &iface->props, &safe_buffer);
+	int err = really_send(sock, dest, iface, &safe_buffer);
 
 	safe_buffer_free(&safe_buffer);
 
@@ -751,8 +751,9 @@ static int send_ra(int sock, struct Interface *iface, struct in6_addr const *des
 	return 0;
 }
 
-static int really_send(int sock, struct in6_addr const *dest, struct properties const *props, struct safe_buffer const *sb)
+static int really_send(int sock, struct in6_addr const *dest, struct Interface *iface, struct safe_buffer const *sb)
 {
+
 	struct sockaddr_in6 addr;
 	memset((void *)&addr, 0, sizeof(addr));
 	addr.sin6_family = AF_INET6;
@@ -771,13 +772,41 @@ static int really_send(int sock, struct in6_addr const *dest, struct properties 
 	cmsg->cmsg_level = IPPROTO_IPV6;
 	cmsg->cmsg_type = IPV6_PKTINFO;
 
+
 	struct in6_pktinfo *pkt_info = (struct in6_pktinfo *)CMSG_DATA(cmsg);
-	pkt_info->ipi6_ifindex = props->if_index;
-	memcpy(&pkt_info->ipi6_addr, &props->if_addr, sizeof(struct in6_addr));
+	pkt_info->ipi6_ifindex = iface->props.if_index;
+
+	if(iface->AdvRASrcAddressList == NULL) {
+		memcpy(&pkt_info->ipi6_addr, &iface->props.if_addr, sizeof(struct in6_addr));
+	} else {
+		// TODO: we could pre-compute this, as it only needs handling when the
+		// addresses on the interface change.
+		// TODO: robbat2
+		int found_src = 0;
+		for (int i = 0; i < iface->props.addrs_count; i++) {
+			struct in6_addr cmp_addr = iface->props.if_addrs[i];
+			for (struct AdvRASrcAddress * current = iface->AdvRASrcAddressList; current; current = current->next) {
+				if ( memcmp(&cmp_addr, &current->address, sizeof(struct in6_addr)) == 0) {
+					char addr_str[INET6_ADDRSTRLEN];
+					addrtostr(&(current->address), addr_str, sizeof(addr_str));
+					dlog(LOG_DEBUG, 4, "really_send selecting source address: %s", addr_str);
+					memcpy(&pkt_info->ipi6_addr, &cmp_addr, sizeof(struct in6_addr));
+					found_src = 1;
+					break;
+				}
+			}
+			if(found_src)
+				break;
+		}
+		if(!found_src) {
+			dlog(LOG_DEBUG, 5, "really_send did not find any configured address, skipping send");
+			return 0;
+		}
+	}
 
 #ifdef HAVE_SIN6_SCOPE_ID
 	if (IN6_IS_ADDR_LINKLOCAL(&addr.sin6_addr) || IN6_IS_ADDR_MC_LINKLOCAL(&addr.sin6_addr))
-		addr.sin6_scope_id = props->if_index;
+		addr.sin6_scope_id = iface->props.if_index;
 #endif
 
 	struct msghdr mhdr;
